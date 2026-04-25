@@ -1,29 +1,82 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:argType="http://schemas.android.com/tools"
-    android:id="@+id/flRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:focusable="true"
-    android:keepScreenOn="true">
+    android:orientation="vertical"
+    android:background="@color/white">
 
-    <androidx.media3.ui.PlayerView
-        android:id="@+id/playerView"
+    <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        app:show_subtitle_button="true"
-        argType:fastforward_increment="15000"
-        argType:resize_mode="fixed_width"
-        argType:rewind_increment="15000"
-        argType:show_buffering="when_playing"
-        argType:show_fastforward_button="true"
-        argType:show_next_button="false"
-        argType:show_previous_button="false"
-        argType:show_rewind_button="true"
-        argType:show_subtitle_button="true"
-        argType:use_artwork="true"
-        argType:use_controller="true"
-        argType:use_sensor_rotation="true" />
+        android:layout_height="wrap_content"
+        app:cardElevation="4dp"
+        app:cardCornerRadius="0dp">
 
-</FrameLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="M3U Playlist URL"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_playlist_url"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textUri"
+                    android:textSize="14sp" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_load_playlist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Load Playlist"
+                android:layout_marginTop="8dp" />
+
+            <ProgressBar
+                android:id="@+id/progress_bar"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+    </com.google.android.material.card.MaterialCardView>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rv_channels"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingBottom="8dp" />
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="250dp"
+        android:background="@color/black">
+
+        <androidx.media3.ui.PlayerView
+            android:id="@+id/player_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            app:show_subtitle_button="true"
+            app:resize_mode="fit"
+            app:show_buffering="when_playing"
+            app:show_fastforward_button="true"
+            app:show_next_button="false"
+            app:show_previous_button="false"
+            app:show_rewind_button="true"
+            app:use_controller="true" />
+
+    </FrameLayout>
+
+</LinearLayout>
