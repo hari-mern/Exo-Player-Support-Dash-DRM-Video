@@ -14,73 +14,149 @@ object LicenseKeyHandler {
         data class Error(val message: String) : LicenseKeyResult()
     }
 
-    fun processLicenseKey(licenseKey: String?): LicenseKeyResult {
+    fun processLicenseKey(licenseKey: String?, httpHeaders: Map<String, String> = emptyMap()): LicenseKeyResult {
+        Log.d(TAG, "========== START processLicenseKey ==========")
+        Log.d(TAG, "License key: ${licenseKey?.take(80)}...")
+        Log.d(TAG, "HTTP Headers: $httpHeaders")
+        
         if (licenseKey.isNullOrBlank()) {
+            Log.e(TAG, "License key is null or blank!")
             return LicenseKeyResult.Error("License key is null or blank")
         }
 
-        Log.d(TAG, "Processing license key: ${licenseKey.take(50)}...")
-
-        return when {
+        val result = when {
             // Format 1: URL (http/https) - fetch from license server
             licenseKey.startsWith("http://") || licenseKey.startsWith("https://") -> {
-                fetchKeysFromServer(licenseKey)
+                Log.d(TAG, "Detected URL format, calling fetchKeysFromServer")
+                fetchKeysFromServer(licenseKey, httpHeaders)
             }
 
             // Format 2: kid_hex:key_hex (e.g., "400131994b445d8c8817202248760fda:2d56cb6f07a75b9aff165d534ae2bfc4")
             licenseKey.contains(":") && !licenseKey.startsWith("http") -> {
+                Log.d(TAG, "Detected inline hex format, calling parseInlineKeys")
                 parseInlineKeys(licenseKey)
             }
 
             // Format 3: Already JSON format (direct ClearKey JSON)
             licenseKey.startsWith("{") -> {
+                Log.d(TAG, "Detected JSON format, calling parseJsonKeys")
                 parseJsonKeys(licenseKey)
             }
 
             else -> {
+                Log.e(TAG, "Unknown license key format: ${licenseKey.take(30)}")
                 LicenseKeyResult.Error("Unknown license key format: ${licenseKey.take(30)}")
             }
         }
+        
+        Log.d(TAG, "processLicenseKey result: $result")
+        Log.d(TAG, "========== END processLicenseKey ==========")
+        return result
     }
 
-    private fun fetchKeysFromServer(url: String): LicenseKeyResult {
-        Log.d(TAG, "Fetching keys from license server: $url")
+    private fun fetchKeysFromServer(url: String, httpHeaders: Map<String, String> = emptyMap()): LicenseKeyResult {
+        Log.d(TAG, "========== START fetchKeysFromServer ==========")
+        Log.d(TAG, "URL: $url")
+        Log.d(TAG, "HTTP Headers: $httpHeaders")
+        
+        var result: LicenseKeyResult = LicenseKeyResult.Error("Failed to fetch keys - default error")
+        
+        try {
+            val thread = Thread {
+                try {
+                    // Try GET first
+                    Log.d(TAG, "Trying GET method...")
+                    val connection = URL(url).openConnection() as java.net.HttpURLConnection
+                    connection.requestMethod = "GET"
+                    connection.connectTimeout = 15000
+                    connection.readTimeout = 15000
+                    
+                    val userAgent = httpHeaders["User-Agent"] ?: "plaYtv/7.1.3 (Linux;Android 14) ExoPlayerLib/2.11.7"
+                    val referer = httpHeaders["Referer"] ?: "https://www.jiotv.com/"
+                    
+                    connection.setRequestProperty("User-Agent", userAgent)
+                    connection.setRequestProperty("Referer", referer)
+                    connection.setRequestProperty("Origin", "https://www.jiotv.com")
+                    
+                    var responseCode = connection.responseCode
+                    Log.d(TAG, "License server response code: $responseCode")
+                    
+                    // If GET returns 405 or other error, try POST
+                    if (responseCode != 200) {
+                        Log.d(TAG, "GET returned $responseCode, trying POST method...")
+                        connection.disconnect()
+                        
+                        val postConnection = URL(url).openConnection() as java.net.HttpURLConnection
+                        postConnection.requestMethod = "POST"
+                        postConnection.connectTimeout = 15000
+                        postConnection.readTimeout = 15000
+                        postConnection.doOutput = true
+                        postConnection.setRequestProperty("User-Agent", userAgent)
+                        postConnection.setRequestProperty("Referer", referer)
+                        postConnection.setRequestProperty("Origin", "https://www.jiotv.com")
+                        postConnection.setRequestProperty("Content-Type", "application/json")
+                        postConnection.setRequestProperty("Accept", "application/json")
+                        
+                        responseCode = postConnection.responseCode
+                        Log.d(TAG, "POST response code: $responseCode")
+                        
+                        if (responseCode == 200) {
+                            val response = postConnection.inputStream.bufferedReader().readText()
+                            result = parseLicenseResponse(response)
+                        } else {
+                            result = LicenseKeyResult.Error("License server returned code: $responseCode")
+                        }
+                    } else {
+                        val response = connection.inputStream.bufferedReader().readText()
+                        result = parseLicenseResponse(response)
+                    }
+                } catch (e: Exception) {
+                    val errorMsg = e.message ?: e.toString()
+                    Log.e(TAG, "Exception in fetchKeysFromServer thread: $errorMsg", e)
+                    result = LicenseKeyResult.Error("Failed to fetch keys: $errorMsg")
+                }
+            }
+            
+            thread.start()
+            thread.join(30000)
+            
+        } catch (e: Exception) {
+            val errorMsg = e.message ?: e.toString()
+            Log.e(TAG, "Thread error: $errorMsg", e)
+            result = LicenseKeyResult.Error("Thread error: $errorMsg")
+        }
+        
+        Log.d(TAG, "========== END fetchKeysFromServer, result: $result ==========")
+        return result
+    }
+    
+    private fun parseLicenseResponse(response: String): LicenseKeyResult {
+        Log.d(TAG, "License server response length: ${response.length}")
+        Log.d(TAG, "License server response: $response")
+        
         return try {
-            val response = URL(url).readText()
-            Log.d(TAG, "License server response: $response")
-
-            // Parse JSON response
             val json = JSONObject(response)
-
             if (json.has("keys") && json.getJSONArray("keys").length() > 0) {
                 val keysArray = json.getJSONArray("keys")
                 val firstKey = keysArray.getJSONObject(0)
-
                 val kidBase64 = firstKey.getString("kid")
                 val keyBase64 = firstKey.getString("k")
-
-                // Convert base64 to hex
+                
                 val kidBytes = Base64.decode(kidBase64, Base64.NO_WRAP)
                 val keyBytes = Base64.decode(keyBase64, Base64.NO_WRAP)
-
                 val kidHex = kidBytes.toHexString()
                 val keyHex = keyBytes.toHexString()
-
-                Log.d(TAG, "Extracted - kid (hex): $kidHex, key (hex): $keyHex")
-
-                // Generate ClearKey JSON
+                
                 val clearKeyJson = """{"keys":[{"kty":"oct","k":"$keyBase64","kid":"$kidBase64"}],"type":"temporary"}"""
-
                 LicenseKeyResult.Success(kidHex, keyHex, clearKeyJson)
             } else {
                 LicenseKeyResult.Error("No keys found in license server response")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to fetch keys from server: ${e.message}")
-            LicenseKeyResult.Error("Failed to fetch keys: ${e.message}")
+            LicenseKeyResult.Error("Failed to parse license response: ${e.message}")
         }
     }
-
+    
     private fun parseInlineKeys(input: String): LicenseKeyResult {
         Log.d(TAG, "Parsing inline keys: $input")
         return try {

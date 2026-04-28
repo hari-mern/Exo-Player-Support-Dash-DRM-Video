@@ -90,7 +90,7 @@ class MainActivity : Activity() {
 
         Log.d(TAG, "ExoPlayer created, loading channel...")
 
-        // Test with new pipe-separated URL format
+        // Test with servertvhub source (working in OTT Navigator)
         val sampleM3U8 = """
 #EXTM3U
 #EXTINF:-1 group-title="Entertainment" tvg-logo="https://jiotvimages.cdn.jio.com/dare_images/images/Gemini_TV_HD.png",Gemini TV HD
@@ -127,9 +127,9 @@ https://servertvhub.site/superlive/mpd.php?id=897|license_type=clearkey&license_
         Log.d(TAG, "User Agent: ${channel.userAgent}")
 
         val httpHeaders = DrmHelper.buildHttpHeaders(channel.httpHeaders)
-        if (!channel.userAgent.isNullOrBlank()) {
-            httpHeaders["User-Agent"] = channel.userAgent
-        }
+        
+        // Always set User-Agent - use channel's userAgent or default
+        httpHeaders["User-Agent"] = channel.userAgent ?: "plaYtv/7.1.3 (Linux;Android 14) ExoPlayerLib/2.11.7"
 
         // Add common headers for Jio TV streams
         httpHeaders["Referer"] = "https://www.jiotv.com/"
