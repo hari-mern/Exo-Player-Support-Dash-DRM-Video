@@ -103,7 +103,15 @@ object StreamParser {
                     }
                 }
                 !line.startsWith("#") && line.isNotBlank() -> {
-                    streamUrl = line
+                    // Check if URL contains pipe separator for combined MPD + license
+                    val parsedUrl = parsePipeSeparatedUrl(line)
+                    streamUrl = parsedUrl.first
+                    if (parsedUrl.second != null && licenseType == null) {
+                        licenseType = parsedUrl.second
+                    }
+                    if (parsedUrl.third != null && licenseKey == null) {
+                        licenseKey = parsedUrl.third
+                    }
                     break
                 }
             }
@@ -143,5 +151,38 @@ object StreamParser {
             }
         }
         return result
+    }
+
+    // Parse URL format: "mpd_url|license_type=xxx&license_key=xxx"
+    // Returns Triple<streamUrl, licenseType, licenseKey>
+    private fun parsePipeSeparatedUrl(url: String): Triple<String?, String?, String?> {
+        if (!url.contains("|")) {
+            return Triple(url, null, null)
+        }
+
+        val parts = url.split("|")
+        val streamUrl = parts[0].trim()
+
+        var licenseType: String? = null
+        var licenseKey: String? = null
+
+        // Parse the params part (e.g., "license_type=clearkey&license_key=...")
+        if (parts.size > 1) {
+            val paramsPart = parts[1]
+            val paramPairs = paramsPart.split("&")
+            for (pair in paramPairs) {
+                val keyValue = pair.split("=", limit = 2)
+                if (keyValue.size == 2) {
+                    val key = keyValue[0].trim()
+                    val value = keyValue[1].trim()
+                    when (key.lowercase()) {
+                        "license_type" -> licenseType = value
+                        "license_key" -> licenseKey = value
+                    }
+                }
+            }
+        }
+
+        return Triple(streamUrl, licenseType, licenseKey)
     }
 }

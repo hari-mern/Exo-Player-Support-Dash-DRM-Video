@@ -90,13 +90,11 @@ class MainActivity : Activity() {
 
         Log.d(TAG, "ExoPlayer created, loading channel...")
 
-        // Test with new source URLs
+        // Test with new pipe-separated URL format
         val sampleM3U8 = """
 #EXTM3U
-#EXTINF:-1 group-title="Entertainment" tvg-logo="https://jiotvimages.cdn.jio.com/dare_images/images/Gemini_TV_HD.png",Gemini TV HD (drmlive)
-#KODIPROP:inputstream.adaptive.license_type=clearkey
-#KODIPROP:inputstream.adaptive.license_key=https://servertvhub.site/superlive/keys.php?id=897
-https://jt.drmlive.net/jiotvplus/897.mpd
+#EXTINF:-1 group-title="Entertainment" tvg-logo="https://jiotvimages.cdn.jio.com/dare_images/images/Gemini_TV_HD.png",Gemini TV HD
+https://servertvhub.site/superlive/mpd.php?id=897|license_type=clearkey&license_key=https://servertvhub.site/superlive/keys.php?id=897
         """.trimIndent()
 
         val channels = StreamParser.parseM3U8(sampleM3U8)
