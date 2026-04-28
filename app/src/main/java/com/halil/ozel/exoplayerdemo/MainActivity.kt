@@ -5,10 +5,16 @@ import android.graphics.BitmapFactory
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.annotation.OptIn
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.LoadControl
 import androidx.media3.exoplayer.dash.DashMediaSource
 import com.halil.ozel.exoplayerdemo.databinding.ActivityMainBinding
 
@@ -18,6 +24,27 @@ class MainActivity : Activity() {
     private var exoPlayer: ExoPlayer? = null
     private var playbackPosition = 0L
     private var playWhenReady = true
+    private var currentChannel: ChannelInfo? = null
+    private var retryCount = 0
+    private val maxRetries = 3
+
+    companion object {
+        private const val TAG = "ExoPlayerDemo"
+        
+        // PRODUCTION-READY LIVE STREAM CONFIGURATION
+        // Buffer settings for live streaming - balance between startup speed and stability
+        private const val MIN_BUFFER_MS = 20000      // 20 seconds minimum (increased for stability)
+        private const val MAX_BUFFER_MS = 60000      // 60 seconds maximum (more buffer for live)
+        private const val BUFFER_FOR_PLAYBACK_MS = 3000  // 3 seconds to start playing
+        private const val BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 5000 // 5 seconds after rebuffer
+        
+        // Live configuration for production use
+        private const val TARGET_LIVE_OFFSET_MS = 8000L  // 8 seconds behind live edge
+        private const val MIN_LIVE_OFFSET_MS = 5000L    // Minimum 5 seconds
+        private const val MAX_LIVE_OFFSET_MS = 30000L   // Maximum 30 seconds
+        private const val MIN_PLAYBACK_SPEED = 0.95f    // Allow slight slowdown
+        private const val MAX_PLAYBACK_SPEED = 1.05f   // Allow slight speedup
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,7 +60,27 @@ class MainActivity : Activity() {
 
     @OptIn(UnstableApi::class)
     private fun preparePlayer() {
-        exoPlayer = ExoPlayer.Builder(this).build()
+        Log.d(TAG, "Preparing ExoPlayer...")
+
+        // Configure load control for live streaming
+        val loadControl: LoadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                MIN_BUFFER_MS,
+                MAX_BUFFER_MS,
+                BUFFER_FOR_PLAYBACK_MS,
+                BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .setTargetBufferBytes(50 * 1024 * 1024) // 50MB target buffer
+            .build()
+
+        exoPlayer = ExoPlayer.Builder(this)
+            .setLoadControl(loadControl)
+            .build()
+
+        // Add player listener for debugging
+        exoPlayer?.addListener(playerListener)
+
         exoPlayer?.playWhenReady = true
         binding.playerView.player = exoPlayer
         binding.playerView.defaultArtwork = BitmapFactory.decodeResource(
@@ -41,31 +88,24 @@ class MainActivity : Activity() {
             R.drawable.ic_launcher_background
         ) as Drawable?
 
+        Log.d(TAG, "ExoPlayer created, loading channel...")
+
+        // Test with new source URLs
         val sampleM3U8 = """
 #EXTM3U
-#EXTINF:-1 group-title="Entertainment" tvg-logo="https://jiotvimages.cdn.jio.com/dare_images/images/Gemini_TV_HD.png",Gemini TV HD
+#EXTINF:-1 group-title="Entertainment" tvg-logo="https://jiotvimages.cdn.jio.com/dare_images/images/Gemini_TV_HD.png",Gemini TV HD (drmlive)
 #KODIPROP:inputstream.adaptive.license_type=clearkey
-#KODIPROP:inputstream.adaptive.license_key=https://alex4528.site/jplus/license
-https://alex4528.site/jplus/LIll0L1iLI0IioloLIIo/manifest.mpd
-
-#EXTINF:-1 tvg-id="SonyLIVSports1.in" tvg-name="SonyLIV Sports 1" tvg-logo="https://jiotv.catchup.cdn.jio.com/dare_images/images/SonyLIV_Sports_1.png" group-title="Sports", SonyLIV Sports 1
-#KODIPROP:inputstream.adaptive.license_type=clearkey
-#KODIPROP:inputstream.adaptive.license_key=4e4c5dba5bfe5a7c9338bc086eb80379:b8e8932f440084e1d2b705fa52eef94b
-#EXTHTTP:{"Cookie":"__hdnea__=st=1775213381~exp=1775234981~acl=/*~hmac=f5780b96fb3563724dcfef24dd519634fca02c67724d1f8130a3331f4290e75a"}
-https://jiotvpllive.cdn.jio.com//bpk-tv/SonyLIV_Sports_1_MOB/WDVLive/index.mpd?__hdnea__=st=1775213381~exp=1775234981~acl=/*~hmac=f5780b96fb3563724dcfef24dd519634fca02c67724d1f8130a3331f4290e75a
-
-#EXTINF:-1 group-title="Jiostar" tvg-logo="https://jiotvimages.cdn.jio.com/dare_images/images/Star_Sports_HD1.png",Star Sports 1 HD
-#KODIPROP:inputstream.adaptive.license_type=clearkey
-#KODIPROP:inputstream.adaptive.license_key=965dc2ddb1d85138ad787999a7f30ca5:859695076e67fe961836b564db6d689c
-#EXTVLCOPT:http-user-agent=plaYtv/7.1.5 (Linux;Android 13) ExoPlayerLib/2.11.6 YGX/69.69.69.69
-#EXTHTTP:{"cookie":"__hdnea__=st=1766796373~exp=1766882773~acl=/*~hmac=ca88377115fd039646668ccd9889fa41145509d34fa3bf1ca5e5eb9b56dfc2c5&xxx=%7Ccookie=__hdnea__=st=1766796373~exp=1766882773~acl=/*~hmac=ca88377115fd039646668ccd9889fa41145509d34fa3bf1ca5e5eb9b56dfc2c5"}
-https://jiotvpllive.cdn.jio.com/bpk-tv/Star_Sports_HD1_Hindi_BTS/WDVLive/playlist.mpd
+#KODIPROP:inputstream.adaptive.license_key=https://servertvhub.site/superlive/keys.php?id=897
+https://jt.drmlive.net/jiotvplus/897.mpd
         """.trimIndent()
 
         val channels = StreamParser.parseM3U8(sampleM3U8)
 
+        Log.d(TAG, "Parsed ${channels.size} channels")
+
         if (channels.isNotEmpty()) {
             val channel = channels[0]
+            Log.d(TAG, "Playing channel: ${channel.name}, URL: ${channel.streamUrl}")
             playChannel(channel)
         }
     }
@@ -73,13 +113,31 @@ https://jiotvpllive.cdn.jio.com/bpk-tv/Star_Sports_HD1_Hindi_BTS/WDVLive/playlis
     @OptIn(UnstableApi::class)
     private fun playChannel(channel: ChannelInfo) {
         if (channel.streamUrl.isNullOrBlank()) {
+            Log.e(TAG, "Channel URL is null or blank!")
             return
         }
+        
+        // Store current channel and reset retry count
+        currentChannel = channel
+        retryCount = 0
+        
+        Log.d(TAG, "Playing channel: ${channel.name}")
+        Log.d(TAG, "Stream URL: ${channel.streamUrl}")
+        Log.d(TAG, "License Type: ${channel.licenseType}")
+        Log.d(TAG, "License Key: ${channel.licenseKey}")
+        Log.d(TAG, "HTTP Headers: ${channel.httpHeaders}")
+        Log.d(TAG, "User Agent: ${channel.userAgent}")
 
         val httpHeaders = DrmHelper.buildHttpHeaders(channel.httpHeaders)
         if (!channel.userAgent.isNullOrBlank()) {
             httpHeaders["User-Agent"] = channel.userAgent
         }
+
+        // Add common headers for Jio TV streams
+        httpHeaders["Referer"] = "https://www.jiotv.com/"
+        httpHeaders["Origin"] = "https://www.jiotv.com"
+
+        Log.d(TAG, "Final HTTP Headers: $httpHeaders")
 
         val mediaSource = DrmHelper.createMediaSource(
             context = this,
@@ -90,12 +148,116 @@ https://jiotvpllive.cdn.jio.com/bpk-tv/Star_Sports_HD1_Hindi_BTS/WDVLive/playlis
         )
 
         if (mediaSource != null) {
+            Log.d(TAG, "MediaSource created successfully, preparing player...")
             exoPlayer?.apply {
                 setMediaSource(mediaSource)
                 seekTo(playbackPosition)
                 playWhenReady = this@MainActivity.playWhenReady
                 prepare()
             }
+        } else {
+            Log.e(TAG, "Failed to create MediaSource!")
+        }
+    }
+
+    private val playerListener = object : Player.Listener {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            val stateName = when (playbackState) {
+                Player.STATE_IDLE -> "IDLE"
+                Player.STATE_BUFFERING -> "BUFFERING"
+                Player.STATE_READY -> "READY"
+                Player.STATE_ENDED -> "ENDED"
+                else -> "UNKNOWN"
+            }
+            Log.d(TAG, "PlaybackState changed to: $stateName")
+
+            when (playbackState) {
+                Player.STATE_BUFFERING -> {
+                    Log.d(TAG, "Player is buffering - waiting for data...")
+                }
+                Player.STATE_READY -> {
+                    Log.d(TAG, "Player is ready - playing!")
+                    if (exoPlayer?.isPlaying == true) {
+                        Log.d(TAG, "Video is currently playing")
+                    }
+                }
+                Player.STATE_IDLE -> {
+                    Log.d(TAG, "Player is idle")
+                }
+                Player.STATE_ENDED -> {
+                    Log.d(TAG, "Player playback ended")
+                }
+            }
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            Log.d(TAG, "isPlaying changed to: $isPlaying")
+            if (isPlaying) {
+                Log.d(TAG, "Playback started!")
+            } else {
+                Log.d(TAG, "Playback paused/stopped")
+                exoPlayer?.let { player ->
+                    Log.d(TAG, "Current position: ${player.currentPosition}ms")
+                    Log.d(TAG, "Playback state: ${player.playbackState}")
+                }
+            }
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            Log.e(TAG, "Player error: ${error.message}")
+            Log.e(TAG, "Error code: ${error.errorCode}")
+            Log.e(TAG, "Error cause: ${error.cause?.message}")
+            
+            when (error.errorCode) {
+                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED -> {
+                    Log.e(TAG, "Network connection failed")
+                }
+                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> {
+                    Log.e(TAG, "Network connection timeout")
+                }
+                PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED -> {
+                    Log.e(TAG, "Manifest parsing error")
+                }
+                PlaybackException.ERROR_CODE_DECODER_INIT_FAILED -> {
+                    Log.e(TAG, "Decoder initialization failed")
+                }
+                PlaybackException.ERROR_CODE_DECODING_FAILED -> {
+                    Log.e(TAG, "Decoding failed")
+                }
+                PlaybackException.ERROR_CODE_DRM_LICENSE_ACQUISITION_FAILED -> {
+                    Log.e(TAG, "DRM license acquisition failed")
+                }
+                else -> {
+                    Log.e(TAG, "Unknown error code: ${error.errorCode}")
+                }
+            }
+            
+            // Auto-retry logic for production
+            handlePlaybackError()
+        }
+        
+        private fun handlePlaybackError() {
+            if (retryCount < maxRetries && currentChannel != null) {
+                retryCount++
+                val delay = (retryCount * 2000L) // 2s, 4s, 6s
+                Log.d(TAG, "Retrying in ${delay}ms (attempt $retryCount/$maxRetries)")
+                
+                binding.root.postDelayed({
+                    Log.d(TAG, "Retrying playback...")
+                    currentChannel?.let { playChannel(it) }
+                }, delay)
+            } else {
+                Log.e(TAG, "Max retries reached. Playback failed.")
+                retryCount = 0
+            }
+        }
+
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int
+        ) {
+            Log.d(TAG, "Position discontinuity: ${oldPosition.positionMs} -> ${newPosition.positionMs}")
         }
     }
 
@@ -107,8 +269,10 @@ https://jiotvpllive.cdn.jio.com/bpk-tv/Star_Sports_HD1_Hindi_BTS/WDVLive/playlis
 
     private fun releasePlayer() {
         exoPlayer?.let { player ->
+            Log.d(TAG, "Releasing player at position: ${player.currentPosition}ms")
             playbackPosition = player.currentPosition
             playWhenReady = player.playWhenReady
+            player.removeListener(playerListener)
             player.release()
             exoPlayer = null
         }

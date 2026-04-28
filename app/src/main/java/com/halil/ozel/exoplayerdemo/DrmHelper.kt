@@ -2,6 +2,7 @@ package com.halil.ozel.exoplayerdemo
 
 import android.content.Context
 import android.util.Base64
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -17,6 +18,7 @@ import androidx.media3.exoplayer.drm.LocalMediaDrmCallback
 import java.nio.charset.StandardCharsets
 
 object DrmHelper {
+    private const val TAG = "DrmHelper"
 
     @OptIn(UnstableApi::class)
     fun createMediaSource(
@@ -26,7 +28,14 @@ object DrmHelper {
         licenseKey: String?,
         httpHeaders: Map<String, String> = emptyMap()
     ): DashMediaSource? {
+        Log.d(TAG, "createMediaSource called")
+        Log.d(TAG, "  Stream URL: $streamUrl")
+        Log.d(TAG, "  License Type: $licenseType")
+        Log.d(TAG, "  License Key: $licenseKey")
+        Log.d(TAG, "  HTTP Headers: $httpHeaders")
+
         if (streamUrl.isBlank() || !streamUrl.contains(".mpd")) {
+            Log.e(TAG, "Invalid stream URL or not an MPD file")
             return null
         }
 
@@ -38,7 +47,19 @@ object DrmHelper {
         if (licenseType != null && licenseKey != null) {
             when (licenseType.lowercase()) {
                 "clearkey" -> {
-                    drmSessionManager = createClearKeyDrmSessionManager(licenseKey, uuid)
+                    // Use LicenseKeyHandler to process all key formats
+                    val keyResult = LicenseKeyHandler.processLicenseKey(licenseKey)
+                    when (keyResult) {
+                        is LicenseKeyHandler.LicenseKeyResult.Success -> {
+                            Log.d(TAG, "License key processed successfully")
+                            drmSessionManager = createClearKeyDrmSessionManagerFromJson(keyResult.clearKeyJson, uuid)
+                        }
+                        is LicenseKeyHandler.LicenseKeyResult.Error -> {
+                            Log.e(TAG, "Failed to process license key: ${keyResult.message}")
+                            // Try direct as fallback
+                            drmSessionManager = createClearKeyDrmSessionManager(licenseKey, uuid)
+                        }
+                    }
                 }
                 "widevine" -> {
                     if (licenseKey.startsWith("http")) {
@@ -120,6 +141,14 @@ object DrmHelper {
             clearKeyJson = licenseKey
         }
 
+        return DefaultDrmSessionManager.Builder()
+            .setUuidAndExoMediaDrmProvider(uuid, FrameworkMediaDrm.DEFAULT_PROVIDER)
+            .build(LocalMediaDrmCallback(clearKeyJson.toByteArray(StandardCharsets.UTF_8)))
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun createClearKeyDrmSessionManagerFromJson(clearKeyJson: String, uuid: java.util.UUID): DrmSessionManager {
+        Log.d(TAG, "Creating ClearKey DRM session from JSON")
         return DefaultDrmSessionManager.Builder()
             .setUuidAndExoMediaDrmProvider(uuid, FrameworkMediaDrm.DEFAULT_PROVIDER)
             .build(LocalMediaDrmCallback(clearKeyJson.toByteArray(StandardCharsets.UTF_8)))
