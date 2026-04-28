@@ -6,9 +6,6 @@ import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Bundle
 import androidx.annotation.OptIn
-import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -34,7 +31,6 @@ class MainActivity : Activity() {
         setContentView(view)
     }
 
-
     @OptIn(UnstableApi::class)
     private fun preparePlayer() {
         exoPlayer = ExoPlayer.Builder(this).build()
@@ -45,28 +41,63 @@ class MainActivity : Activity() {
             R.drawable.ic_launcher_background
         ) as Drawable?
 
-        val drmConfiguration = MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID)
-            .setLicenseUri(LICENSE_URL)
-            .setLicenseRequestHeaders(mapOf("X-AxDRM-Message" to DRM_TOKEN))
-            .build()
+        val sampleM3U8 = """
+#EXTM3U
+#EXTINF:-1 group-title="Entertainment" tvg-logo="https://jiotvimages.cdn.jio.com/dare_images/images/Gemini_TV_HD.png",Gemini TV HD
+#KODIPROP:inputstream.adaptive.license_type=clearkey
+#KODIPROP:inputstream.adaptive.license_key=https://alex4528.site/jplus/license
+https://alex4528.site/jplus/LIll0L1iLI0IioloLIIo/manifest.mpd
 
-        val mediaItem = MediaItem.Builder()
-            .setUri(DASH_URL)
-            .setMimeType(MimeTypes.APPLICATION_MPD)
-            .setDrmConfiguration(drmConfiguration)
-            .build()
+#EXTINF:-1 tvg-id="SonyLIVSports1.in" tvg-name="SonyLIV Sports 1" tvg-logo="https://jiotv.catchup.cdn.jio.com/dare_images/images/SonyLIV_Sports_1.png" group-title="Sports", SonyLIV Sports 1
+#KODIPROP:inputstream.adaptive.license_type=clearkey
+#KODIPROP:inputstream.adaptive.license_key=4e4c5dba5bfe5a7c9338bc086eb80379:b8e8932f440084e1d2b705fa52eef94b
+#EXTHTTP:{"Cookie":"__hdnea__=st=1775213381~exp=1775234981~acl=/*~hmac=f5780b96fb3563724dcfef24dd519634fca02c67724d1f8130a3331f4290e75a"}
+https://jiotvpllive.cdn.jio.com//bpk-tv/SonyLIV_Sports_1_MOB/WDVLive/index.mpd?__hdnea__=st=1775213381~exp=1775234981~acl=/*~hmac=f5780b96fb3563724dcfef24dd519634fca02c67724d1f8130a3331f4290e75a
 
-        val mediaSource = DashMediaSource.Factory(DefaultHttpDataSource.Factory())
-            .createMediaSource(mediaItem)
+#EXTINF:-1 group-title="Jiostar" tvg-logo="https://jiotvimages.cdn.jio.com/dare_images/images/Star_Sports_HD1.png",Star Sports 1 HD
+#KODIPROP:inputstream.adaptive.license_type=clearkey
+#KODIPROP:inputstream.adaptive.license_key=965dc2ddb1d85138ad787999a7f30ca5:859695076e67fe961836b564db6d689c
+#EXTVLCOPT:http-user-agent=plaYtv/7.1.5 (Linux;Android 13) ExoPlayerLib/2.11.6 YGX/69.69.69.69
+#EXTHTTP:{"cookie":"__hdnea__=st=1766796373~exp=1766882773~acl=/*~hmac=ca88377115fd039646668ccd9889fa41145509d34fa3bf1ca5e5eb9b56dfc2c5&xxx=%7Ccookie=__hdnea__=st=1766796373~exp=1766882773~acl=/*~hmac=ca88377115fd039646668ccd9889fa41145509d34fa3bf1ca5e5eb9b56dfc2c5"}
+https://jiotvpllive.cdn.jio.com/bpk-tv/Star_Sports_HD1_Hindi_BTS/WDVLive/playlist.mpd
+        """.trimIndent()
 
-        exoPlayer?.apply {
-            setMediaSource(mediaSource)
-            seekTo(playbackPosition)
-            playWhenReady = playWhenReady
-            prepare()
+        val channels = StreamParser.parseM3U8(sampleM3U8)
+
+        if (channels.isNotEmpty()) {
+            val channel = channels[0]
+            playChannel(channel)
         }
     }
 
+    @OptIn(UnstableApi::class)
+    private fun playChannel(channel: ChannelInfo) {
+        if (channel.streamUrl.isNullOrBlank()) {
+            return
+        }
+
+        val httpHeaders = DrmHelper.buildHttpHeaders(channel.httpHeaders)
+        if (!channel.userAgent.isNullOrBlank()) {
+            httpHeaders["User-Agent"] = channel.userAgent
+        }
+
+        val mediaSource = DrmHelper.createMediaSource(
+            context = this,
+            streamUrl = channel.streamUrl,
+            licenseType = channel.licenseType,
+            licenseKey = channel.licenseKey,
+            httpHeaders = httpHeaders
+        )
+
+        if (mediaSource != null) {
+            exoPlayer?.apply {
+                setMediaSource(mediaSource)
+                seekTo(playbackPosition)
+                playWhenReady = this@MainActivity.playWhenReady
+                prepare()
+            }
+        }
+    }
 
     private fun enterPipMode() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -101,11 +132,5 @@ class MainActivity : Activity() {
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         enterPipMode()
-    }
-
-    companion object {
-        private const val DASH_URL = "https://media.axprod.net/TestVectors/Cmaf/protected_1080p_h264_cbcs/manifest.mpd"
-        private const val LICENSE_URL = "https://drm-widevine-licensing.axtest.net/AcquireLicense"
-        private const val DRM_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJ2ZXJzaW9uIjogMSwKICAiY29tX2tleV9pZCI6ICI2OWU1NDA4OC1lOWUwLTQ1MzAtOGMxYS0xZWI2ZGNkMGQxNGUiLAogICJtZXNzYWdlIjogewogICAgInR5cGUiOiAiZW50aXRsZW1lbnRfbWVzc2FnZSIsCiAgICAidmVyc2lvbiI6IDIsCiAgICAibGljZW5zZSI6IHsKICAgICAgImFsbG93X3BlcnNpc3RlbmNlIjogdHJ1ZQogICAgfSwKICAgICJjb250ZW50X2tleXNfc291cmNlIjogewogICAgICAiaW5saW5lIjogWwogICAgICAgIHsKICAgICAgICAgICJpZCI6ICIzMDJmODBkZC00MTFlLTQ4ODYtYmNhNS1iYjFmODAxOGEwMjQiLAogICAgICAgICAgImVuY3J5cHRlZF9rZXkiOiAicm9LQWcwdDdKaTFpNDNmd3YremZ0UT09IiwKICAgICAgICAgICJ1c2FnZV9wb2xpY3kiOiAiUG9saWN5IEEiCiAgICAgICAgfQogICAgICBdCiAgICB9LAogICAgImNvbnRlbnRfa2V5X3VzYWdlX3BvbGljaWVzIjogWwogICAgICB7CiAgICAgICAgIm5hbWUiOiAiUG9saWN5IEEiLAogICAgICAgICJwbGF5cmVhZHkiOiB7CiAgICAgICAgICAibWluX2RldmljZV9zZWN1cml0eV9sZXZlbCI6IDE1MCwKICAgICAgICAgICJwbGF5X2VuYWJsZXJzIjogWwogICAgICAgICAgICAiNzg2NjI3RDgtQzJBNi00NEJFLThGODgtMDhBRTI1NUIwMUE3IgogICAgICAgICAgXQogICAgICAgIH0KICAgICAgfQogICAgXQogIH0KfQ._NfhLVY7S6k8TJDWPeMPhUawhympnrk6WAZHOVjER6M"
     }
 }
